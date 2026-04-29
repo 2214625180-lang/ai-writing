@@ -3,12 +3,13 @@ import "server-only";
 import { GenerationStatus, type Plan, type Template } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { userService } from "@/services/user.service";
 import type {
   GenerationHistoryResult,
   GetGenerationHistoryParams
 } from "@/types/generation";
 
-const DEFAULT_GENERATION_MODEL = "gpt-4.1-mini";
+const DEFAULT_GENERATION_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini";
 
 export interface CreatePendingGenerationParams {
   userId: string;
@@ -17,10 +18,45 @@ export interface CreatePendingGenerationParams {
   model?: string;
 }
 
+export interface CreatePendingTemplateGenerationParams {
+  userId: string;
+  templateId: string;
+  input: string;
+}
+
 export type GenerationTemplateAccessSnapshot = Pick<
   Template,
   "id" | "isActive" | "isPremium"
 >;
+
+export class GenerationNotFoundError extends Error {
+  constructor() {
+    super("Generation not found.");
+    this.name = "GenerationNotFoundError";
+  }
+}
+
+export class GenerationForbiddenError extends Error {
+  constructor() {
+    super("Forbidden.");
+    this.name = "GenerationForbiddenError";
+  }
+}
+
+export class GenerationPremiumRequiredError extends Error {
+  constructor() {
+    super("Premium template requires a paid plan.");
+    this.name = "GenerationPremiumRequiredError";
+  }
+}
+
+export interface RerunnableGeneration {
+  id: string;
+  userId: string;
+  templateId: string | null;
+  input: string;
+  model: string;
+}
 
 export function canUsePremiumTemplate(plan: Plan): boolean {
   return plan === "PRO" || plan === "TEAM";
@@ -35,6 +71,21 @@ function normalizePagination(params: GetGenerationHistoryParams) {
     pageSize,
     skip: (page - 1) * pageSize
   };
+}
+
+function createPendingGenerationRecord(params: CreatePendingGenerationParams) {
+  return prisma.generation.create({
+    data: {
+      userId: params.userId,
+      templateId: params.templateId,
+      input: params.input,
+      model: params.model ?? DEFAULT_GENERATION_MODEL,
+      status: GenerationStatus.PENDING
+    },
+    select: {
+      id: true
+    }
+  });
 }
 
 export const generationService = {
@@ -103,6 +154,59 @@ export const generationService = {
     });
   },
 
+  async getGenerationForRerun(generationId: string) {
+    return prisma.generation.findUnique({
+      where: {
+        id: generationId
+      },
+      select: {
+        id: true,
+        userId: true,
+        templateId: true,
+        input: true,
+        model: true,
+        template: {
+          select: {
+            id: true,
+            isActive: true,
+            isPremium: true
+          }
+        }
+      }
+    });
+  },
+
+  async getRerunnableGeneration(params: {
+    generationId: string;
+    userId: string;
+    userPlan: Plan;
+  }): Promise<RerunnableGeneration> {
+    const generation = await this.getGenerationForRerun(params.generationId);
+
+    if (!generation) {
+      throw new GenerationNotFoundError();
+    }
+
+    if (generation.userId !== params.userId) {
+      throw new GenerationForbiddenError();
+    }
+
+    if (generation.templateId) {
+      if (!generation.template?.isActive) {
+        throw new GenerationNotFoundError();
+      }
+
+      if (
+        generation.template.isPremium &&
+        !canUsePremiumTemplate(params.userPlan)
+      ) {
+        throw new GenerationPremiumRequiredError();
+      }
+    }
+
+    return generation;
+  },
+
   async getTemplateAccessSnapshot(
     templateId: string
   ): Promise<GenerationTemplateAccessSnapshot | null> {
@@ -136,17 +240,16 @@ export const generationService = {
   },
 
   async createPendingGeneration(params: CreatePendingGenerationParams) {
-    return prisma.generation.create({
-      data: {
-        userId: params.userId,
-        templateId: params.templateId,
-        input: params.input,
-        model: params.model ?? DEFAULT_GENERATION_MODEL,
-        status: GenerationStatus.PENDING
-      },
-      select: {
-        id: true
-      }
+    return createPendingGenerationRecord(params);
+  },
+
+  async createPendingTemplateGeneration(
+    params: CreatePendingTemplateGenerationParams
+  ) {
+    return createPendingGenerationRecord({
+      userId: params.userId,
+      templateId: params.templateId,
+      input: params.input
     });
   },
 
@@ -210,3 +313,11 @@ export const generationService = {
     });
   }
 };
+
+export async function getGenerationHistory(
+  params: GetGenerationHistoryParams = {}
+): Promise<GenerationHistoryResult> {
+  const user = await userService.getCurrentUser();
+
+  return generationService.getGenerationHistory(user.id, params);
+}

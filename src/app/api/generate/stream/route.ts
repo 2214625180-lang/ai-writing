@@ -38,6 +38,17 @@ function estimateTokenCount(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+async function markGenerationFailedSafely(params: {
+  generationId: string;
+  errorMessage: string;
+}) {
+  try {
+    await generationService.markGenerationFailed(params);
+  } catch {
+    // The original generation error is more useful than a secondary DB update failure.
+  }
+}
+
 export async function GET(request: NextRequest) {
   const generationId = request.nextUrl.searchParams.get("generationId");
 
@@ -71,23 +82,33 @@ export async function GET(request: NextRequest) {
     let openAIStream;
 
     try {
-      openAIStream = await openai.chat.completions.create({
-        model: generation.model,
-        stream: true,
-        messages: [
-          {
-            role: "user",
-            content: prompt
-          }
-        ]
-      });
+      openAIStream = await openai.chat.completions.create(
+        {
+          model: generation.model,
+          stream: true,
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ]
+        },
+        {
+          signal: request.signal
+        }
+      );
     } catch (error) {
-      await generationService.markGenerationFailed({
+      const errorMessage = getErrorMessage(error);
+
+      await markGenerationFailedSafely({
         generationId: generation.id,
-        errorMessage: getErrorMessage(error)
+        errorMessage
       });
 
-      return createErrorResponse("Failed to start AI generation stream.", 500);
+      return createErrorResponse(
+        `Failed to start AI generation stream: ${errorMessage}`,
+        500
+      );
     }
 
     const readableStream = new ReadableStream<Uint8Array>({
@@ -96,6 +117,10 @@ export async function GET(request: NextRequest) {
 
         try {
           for await (const chunk of openAIStream) {
+            if (request.signal.aborted) {
+              throw new Error("Generation request was aborted.");
+            }
+
             const content = chunk.choices[0]?.delta?.content;
 
             if (!content) {
@@ -127,21 +152,26 @@ export async function GET(request: NextRequest) {
 
           controller.close();
         } catch (error) {
-          await generationService.markGenerationFailed({
+          await markGenerationFailedSafely({
             generationId: generation.id,
             errorMessage: getErrorMessage(error)
           });
 
           controller.error(error);
         }
+      },
+      async cancel() {
+        await markGenerationFailedSafely({
+          generationId: generation.id,
+          errorMessage: "Generation stream was canceled by the client."
+        });
       }
     });
 
     return new Response(readableStream, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        "Transfer-Encoding": "chunked"
+        "Cache-Control": "no-cache, no-transform"
       }
     });
   } catch (error) {

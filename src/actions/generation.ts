@@ -6,6 +6,9 @@ import { createErrorResult, createSuccessResult } from "@/lib/actions";
 import { AuthError } from "@/lib/auth";
 import {
   canUsePremiumTemplate,
+  GenerationForbiddenError,
+  GenerationNotFoundError,
+  GenerationPremiumRequiredError,
   generationService
 } from "@/services/generation.service";
 import { usageService } from "@/services/usage.service";
@@ -13,7 +16,8 @@ import { userService } from "@/services/user.service";
 import type {
   DeleteGenerationResult,
   CreateGenerationInput,
-  CreateGenerationResult
+  CreateGenerationResult,
+  RerunGenerationResult
 } from "@/types/generation";
 
 const createGenerationSchema = z.object({
@@ -26,6 +30,8 @@ const createGenerationSchema = z.object({
   requirements: z.string().trim().optional(),
   model: z.string().trim().min(1).optional()
 });
+
+const generationIdSchema = z.string().trim().min(1);
 
 function buildGenerationInputSnapshot(input: z.infer<typeof createGenerationSchema>): string {
   const optionalSections = [
@@ -49,9 +55,9 @@ export async function createGenerationAction(
   try {
     const parsedInput = createGenerationSchema.parse(input);
     const user = await userService.getCurrentUser();
-    const hasRemainingUsage = await usageService.checkUsageLimit(user.id);
+    const usageLimit = await usageService.checkUsageLimit(user.id);
 
-    if (!hasRemainingUsage) {
+    if (!usageLimit.allowed) {
       return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
     }
 
@@ -112,13 +118,12 @@ export async function getRecentGenerationsAction() {
 
 export async function deleteGenerationAction(generationId: string) {
   try {
+    const parsedGenerationId = generationIdSchema.parse(generationId);
     const user = await userService.getCurrentUser();
 
-    if (!generationId) {
-      return createErrorResult("Generation not found.", "NOT_FOUND");
-    }
-
-    const generation = await generationService.getGenerationOwnerSnapshot(generationId);
+    const generation = await generationService.getGenerationOwnerSnapshot(
+      parsedGenerationId
+    );
 
     if (!generation) {
       return createErrorResult("Generation not found.", "NOT_FOUND");
@@ -136,6 +141,63 @@ export async function deleteGenerationAction(generationId: string) {
   } catch (error) {
     if (error instanceof AuthError) {
       return createErrorResult("Unauthorized.", "UNAUTHORIZED");
+    }
+
+    if (error instanceof z.ZodError) {
+      return createErrorResult("Invalid generation id.", "VALIDATION_ERROR");
+    }
+
+    throw error;
+  }
+}
+
+export async function rerunGenerationAction(generationId: string) {
+  try {
+    const parsedGenerationId = generationIdSchema.parse(generationId);
+    const user = await userService.getCurrentUser();
+    const sourceGeneration = await generationService.getRerunnableGeneration({
+      generationId: parsedGenerationId,
+      userId: user.id,
+      userPlan: user.plan
+    });
+    const usageLimit = await usageService.checkUsageLimit(user.id);
+
+    if (!usageLimit.allowed) {
+      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
+    }
+
+    const generation = await generationService.createPendingGeneration({
+      userId: user.id,
+      templateId: sourceGeneration.templateId ?? undefined,
+      input: sourceGeneration.input,
+      model: sourceGeneration.model
+    });
+
+    return createSuccessResult<RerunGenerationResult>({
+      generationId: generation.id
+    });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return createErrorResult("Unauthorized.", "UNAUTHORIZED");
+    }
+
+    if (error instanceof z.ZodError) {
+      return createErrorResult("Invalid generation id.", "VALIDATION_ERROR");
+    }
+
+    if (error instanceof GenerationNotFoundError) {
+      return createErrorResult("Generation not found.", "NOT_FOUND");
+    }
+
+    if (error instanceof GenerationForbiddenError) {
+      return createErrorResult("Forbidden.", "FORBIDDEN");
+    }
+
+    if (error instanceof GenerationPremiumRequiredError) {
+      return createErrorResult(
+        "Premium template requires a paid plan.",
+        "PREMIUM_REQUIRED"
+      );
     }
 
     throw error;

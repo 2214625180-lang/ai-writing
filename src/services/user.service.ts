@@ -11,6 +11,7 @@ export interface CurrentUser {
   email: string;
   name: string | null;
   imageUrl: string | null;
+  stripeCustomerId: string | null;
   plan: Plan;
 }
 
@@ -131,6 +132,7 @@ function mapUserToCurrentUser(user: User): CurrentUser {
     email: user.email,
     name: user.name,
     imageUrl: imageUrlWithVersion,
+    stripeCustomerId: user.stripeCustomerId,
     plan: user.plan
   };
 }

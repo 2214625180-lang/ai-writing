@@ -59,7 +59,7 @@ export default async function DashboardPage() {
   const currentUser = await userService.getCurrentUser();
   const [currentUsage, monthlyUsage] = await Promise.all([
     usageService.getCurrentUsage(),
-    usageService.getCurrentMonthUsage(currentUser.id)
+    usageService.getCurrentUserMonthUsage()
   ]);
 
   const displayName = currentUser.name?.trim() || currentUser.email;

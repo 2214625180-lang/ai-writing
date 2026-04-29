@@ -1,16 +1,35 @@
 export interface GetTemplatesParams {
   category?: string;
-  isPremium?: boolean;
-  isActive?: boolean;
-  search?: string;
-  page?: number;
-  pageSize?: number;
+  keyword?: string;
+  includePremium?: boolean;
+}
+
+export interface TemplateListItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  fields: unknown;
+  isPremium: boolean;
+}
+
+export interface TemplateDetail {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  prompt: string;
+  fields: unknown;
+  isPremium: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface CreateGenerationFromTemplateInput {
   templateId: string;
-  model: string;
-  fieldValues: Record<string, string | number | boolean | null>;
-  title?: string;
-  documentId?: string;
+  values: Record<string, string>;
+}
+
+export interface CreateGenerationFromTemplateResult {
+  generationId: string;
 }

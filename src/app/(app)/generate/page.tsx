@@ -1,6 +1,12 @@
 import { GenerationForm } from "@/components/generation/generation-form";
 
-export default function GeneratePage() {
+interface GeneratePageProps {
+  searchParams?: {
+    generationId?: string;
+  };
+}
+
+export default function GeneratePage({ searchParams }: GeneratePageProps) {
   return (
     <div className="space-y-6">
       <section className="border-b border-slate-200 pb-6">
@@ -13,7 +19,7 @@ export default function GeneratePage() {
         </p>
       </section>
 
-      <GenerationForm />
+      <GenerationForm initialGenerationId={searchParams?.generationId} />
     </div>
   );
 }

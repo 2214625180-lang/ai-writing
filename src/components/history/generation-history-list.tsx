@@ -1,6 +1,7 @@
 import { FileClock } from "lucide-react";
 
 import { DeleteGenerationButton } from "@/components/history/delete-generation-button";
+import { RerunGenerationButton } from "@/components/history/rerun-generation-button";
 import type {
   GenerationHistoryItem,
   GenerationHistoryResult,
@@ -76,6 +77,7 @@ function GenerationHistoryCard({ item }: { item: GenerationHistoryItem }) {
               {item.totalTokens ?? 0}
             </p>
           </div>
+          <RerunGenerationButton generationId={item.id} />
           <DeleteGenerationButton generationId={item.id} />
         </div>
       </div>

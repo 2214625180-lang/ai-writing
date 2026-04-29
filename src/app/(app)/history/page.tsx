@@ -1,10 +1,8 @@
 import { GenerationHistoryList } from "@/components/history/generation-history-list";
-import { generationService } from "@/services/generation.service";
-import { userService } from "@/services/user.service";
+import { getGenerationHistory } from "@/services/generation.service";
 
 export default async function HistoryPage() {
-  const user = await userService.getCurrentUser();
-  const history = await generationService.getGenerationHistory(user.id, {
+  const history = await getGenerationHistory({
     page: 1,
     pageSize: 20
   });

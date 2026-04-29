@@ -1,7 +1,15 @@
 export type BillingPlan = "FREE" | "PRO" | "TEAM";
 
+export type CheckoutPlan = Exclude<BillingPlan, "FREE">;
+
 export interface CreateCheckoutSessionInput {
-  plan: Exclude<BillingPlan, "FREE">;
-  successUrl?: string;
-  cancelUrl?: string;
+  plan: CheckoutPlan;
+}
+
+export interface CreateCheckoutSessionResult {
+  url: string;
+}
+
+export interface CreateCustomerPortalResult {
+  url: string;
 }

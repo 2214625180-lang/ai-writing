@@ -15,25 +15,79 @@ export interface CurrentUsage {
   remaining: number;
 }
 
+export interface UsageLimitResult {
+  allowed: boolean;
+  used: number;
+  limit: number;
+  remaining: number;
+  reason?: "USAGE_LIMIT_EXCEEDED";
+}
+
+export interface RecordUsageInput {
+  userId: string;
+  generationId?: string;
+  type: UsageType;
+  count?: number;
+  tokens?: number;
+}
+
+async function getUsageSummaryForUser(params: {
+  userId: string;
+  plan: Plan;
+  period?: string;
+}) {
+  const period = params.period ?? getCurrentPeriod();
+  const usageAggregate = await prisma.usageRecord.aggregate({
+    where: {
+      userId: params.userId,
+      period,
+      type: UsageType.GENERATION
+    },
+    _sum: {
+      count: true
+    }
+  });
+  const used = usageAggregate._sum.count ?? 0;
+  const limit = getPlanGenerationLimit(params.plan);
+  const remaining = Math.max(limit - used, 0);
+
+  return {
+    period,
+    used,
+    limit,
+    remaining
+  };
+}
+
 export const usageService = {
-  async recordGenerationUsage(params: {
-    userId: string;
-    generationId: string;
-    tokens?: number;
-  }) {
+  async recordUsage(params: RecordUsageInput) {
     return prisma.usageRecord.create({
       data: {
         userId: params.userId,
         generationId: params.generationId,
-        type: UsageType.GENERATION,
-        count: 1,
+        type: params.type,
+        count: params.count ?? 1,
         tokens: params.tokens,
         period: getCurrentPeriod()
       }
     });
   },
 
-  async checkUsageLimit(userId: string): Promise<boolean> {
+  async recordGenerationUsage(params: {
+    userId: string;
+    generationId: string;
+    tokens?: number;
+  }) {
+    return this.recordUsage({
+      userId: params.userId,
+      generationId: params.generationId,
+      type: UsageType.GENERATION,
+      count: 1,
+      tokens: params.tokens
+    });
+  },
+
+  async checkUsageLimit(userId: string): Promise<UsageLimitResult> {
     const user = await prisma.user.findUnique({
       where: {
         id: userId
@@ -44,52 +98,46 @@ export const usageService = {
     });
 
     if (!user) {
-      return false;
+      return {
+        allowed: false,
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        reason: "USAGE_LIMIT_EXCEEDED"
+      };
     }
 
-    const period = getCurrentPeriod();
-    const usageAggregate = await prisma.usageRecord.aggregate({
-      where: {
-        userId,
-        period,
-        type: UsageType.GENERATION
-      },
-      _sum: {
-        count: true
-      }
+    const usageSummary = await getUsageSummaryForUser({
+      userId,
+      plan: user.plan
     });
+    const allowed = usageSummary.used < usageSummary.limit;
 
-    const used = usageAggregate._sum.count ?? 0;
-    const limit = getPlanGenerationLimit(user.plan);
-
-    return used < limit;
+    return {
+      allowed,
+      used: usageSummary.used,
+      limit: usageSummary.limit,
+      remaining: usageSummary.remaining,
+      reason: allowed ? undefined : "USAGE_LIMIT_EXCEEDED"
+    };
   },
 
   async getCurrentUsage(): Promise<CurrentUsage> {
     const currentUser = await userService.getCurrentUser();
     const period = getCurrentPeriod();
 
-    const usageAggregate = await prisma.usageRecord.aggregate({
-      where: {
-        userId: currentUser.id,
-        period,
-        type: UsageType.GENERATION
-      },
-      _sum: {
-        count: true
-      }
+    const usageSummary = await getUsageSummaryForUser({
+      userId: currentUser.id,
+      plan: currentUser.plan,
+      period
     });
-
-    const used = usageAggregate._sum.count ?? 0;
-    const limit = getPlanGenerationLimit(currentUser.plan);
-    const remaining = Math.max(limit - used, 0);
 
     return {
       plan: currentUser.plan,
-      period,
-      used,
-      limit,
-      remaining
+      period: usageSummary.period,
+      used: usageSummary.used,
+      limit: usageSummary.limit,
+      remaining: usageSummary.remaining
     };
   },
 
@@ -124,5 +172,11 @@ export const usageService = {
       generationCount,
       tokensUsed: tokenUsage._sum.totalTokens ?? 0
     };
+  },
+
+  async getCurrentUserMonthUsage() {
+    const currentUser = await userService.getCurrentUser();
+
+    return this.getCurrentMonthUsage(currentUser.id);
   }
 };

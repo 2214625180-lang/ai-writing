@@ -44,3 +44,7 @@ export interface GenerationHistoryResult {
 export interface DeleteGenerationResult {
   deleted: true;
 }
+
+export interface RerunGenerationResult {
+  generationId: string;
+}

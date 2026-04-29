@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GenerationStatus {
+  queued
+  completed
+  failed
+}
+
+enum SubscriptionPlanCode {
+  free
+  pro
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+  incomplete
+}
+
+model User {
+  id           String         @id @default(cuid())
+  clerkUserId  String         @unique
+  email        String?        @unique
+  fullName     String?
+  avatarUrl    String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  generations  Generation[]
+  documents    Document[]
+  templates    Template[]     @relation("UserTemplates")
+  subscription Subscription?
+  usageEvents  UsageEvent[]
+}
+
+model Generation {
+  id         String           @id @default(cuid())
+  userId     String
+  title      String?
+  prompt     String           @db.Text
+  content    String           @db.Text
+  model      String
+  status     GenerationStatus @default(queued)
+  tokensUsed Int              @default(0)
+  metadata   Json?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  content   String   @db.Text
+  wordCount Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model Template {
+  id             String   @id @default(cuid())
+  ownerUserId    String?
+  name           String
+  slug           String   @unique
+  description    String
+  promptTemplate String   @db.Text
+  isActive       Boolean  @default(true)
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  owner          User?    @relation("UserTemplates", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  @@index([isActive, isSystem])
+}
+
+model Subscription {
+  id                   String               @id @default(cuid())
+  userId               String               @unique
+  planCode             SubscriptionPlanCode @default(free)
+  status               SubscriptionStatus   @default(incomplete)
+  stripeCustomerId     String?              @unique
+  stripeSubscriptionId String?              @unique
+  stripePriceId        String?
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean              @default(false)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UsageEvent {
+  id           String   @id @default(cuid())
+  userId       String
+  generationId String?
+  eventType    String
+  tokenCount   Int      @default(0)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}

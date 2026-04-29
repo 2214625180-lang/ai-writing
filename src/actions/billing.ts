@@ -1,16 +1,17 @@
 "use server";
 
-import { createActionError, createActionSuccess } from "@/lib/actions";
-import { requireDatabaseUserId } from "@/lib/auth";
+import { createErrorResult, createSuccessResult } from "@/lib/actions";
 import { billingService } from "@/services/billing.service";
+import { userService } from "@/services/user.service";
 
 export async function getCurrentSubscriptionAction() {
   try {
-    const userId = await requireDatabaseUserId();
+    const user = await userService.getCurrentUser();
+    const userId = user.id;
     const subscription = await billingService.getSubscriptionByUserId(userId);
 
-    return createActionSuccess(subscription);
+    return createSuccessResult(subscription);
   } catch {
-    return createActionError("FAILED_TO_LOAD_SUBSCRIPTION");
+    return createErrorResult("Failed to load current subscription.");
   }
 }

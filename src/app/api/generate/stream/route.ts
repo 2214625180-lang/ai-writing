@@ -1,23 +1,154 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-import { requireAuth } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
+import { openai } from "@/lib/openai";
+import { buildWritingPrompt } from "@/lib/prompts";
+import { generationService } from "@/services/generation.service";
+import { usageService } from "@/services/usage.service";
+import { userService } from "@/services/user.service";
 
-export async function POST() {
+export const runtime = "nodejs";
+
+const encoder = new TextEncoder();
+
+function createErrorResponse(message: string, status: number) {
+  return NextResponse.json(
+    {
+      error: message
+    },
+    {
+      status
+    }
+  );
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unknown generation stream error.";
+}
+
+function estimateTokenCount(text: string): number {
+  if (!text.trim()) {
+    return 0;
+  }
+
+  return Math.ceil(text.length / 4);
+}
+
+export async function GET(request: NextRequest) {
+  const generationId = request.nextUrl.searchParams.get("generationId");
+
+  if (!generationId) {
+    return createErrorResponse("Missing generationId.", 400);
+  }
+
   try {
-    await requireAuth();
+    const currentUser = await userService.getCurrentUser();
+    const generation = await generationService.getGenerationForStream(generationId);
 
-    return NextResponse.json(
-      {
-        message: "Streaming generation API scaffold is ready for implementation."
-      },
-      { status: 501 }
-    );
-  } catch {
-    return NextResponse.json(
-      {
-        message: "Unauthorized."
-      },
-      { status: 401 }
-    );
+    if (!generation) {
+      return createErrorResponse("Generation not found.", 404);
+    }
+
+    if (generation.userId !== currentUser.id) {
+      return createErrorResponse("Forbidden.", 403);
+    }
+
+    if (generation.template && !generation.template.isActive) {
+      return createErrorResponse("Template is not active.", 404);
+    }
+
+    await generationService.markGenerationStreaming(generation.id);
+
+    const prompt = buildWritingPrompt({
+      input: generation.input,
+      templatePrompt: generation.template?.prompt
+    });
+
+    let openAIStream;
+
+    try {
+      openAIStream = await openai.chat.completions.create({
+        model: generation.model,
+        stream: true,
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ]
+      });
+    } catch (error) {
+      await generationService.markGenerationFailed({
+        generationId: generation.id,
+        errorMessage: getErrorMessage(error)
+      });
+
+      return createErrorResponse("Failed to start AI generation stream.", 500);
+    }
+
+    const readableStream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const outputChunks: string[] = [];
+
+        try {
+          for await (const chunk of openAIStream) {
+            const content = chunk.choices[0]?.delta?.content;
+
+            if (!content) {
+              continue;
+            }
+
+            outputChunks.push(content);
+            controller.enqueue(encoder.encode(content));
+          }
+
+          const output = outputChunks.join("");
+          const promptTokens = estimateTokenCount(prompt);
+          const outputTokens = estimateTokenCount(output);
+          const totalTokens = promptTokens + outputTokens;
+
+          await generationService.markGenerationCompleted({
+            generationId: generation.id,
+            output,
+            promptTokens,
+            outputTokens,
+            totalTokens
+          });
+
+          await usageService.recordGenerationUsage({
+            userId: currentUser.id,
+            generationId: generation.id,
+            tokens: totalTokens
+          });
+
+          controller.close();
+        } catch (error) {
+          await generationService.markGenerationFailed({
+            generationId: generation.id,
+            errorMessage: getErrorMessage(error)
+          });
+
+          controller.error(error);
+        }
+      }
+    });
+
+    return new Response(readableStream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Transfer-Encoding": "chunked"
+      }
+    });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return createErrorResponse("Unauthorized.", 401);
+    }
+
+    return createErrorResponse("Failed to stream generation.", 500);
   }
 }

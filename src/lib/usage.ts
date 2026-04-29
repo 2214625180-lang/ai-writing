@@ -1,11 +1,8 @@
-import { SUBSCRIPTION_PLANS, type SubscriptionPlanCode } from "@/lib/plans";
+import "server-only";
 
-export function getUsageLimitSnapshot(planCode: SubscriptionPlanCode) {
-  const plan = SUBSCRIPTION_PLANS[planCode];
+export function getCurrentPeriod(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
 
-  return {
-    planCode,
-    monthlyTokenLimit: plan.monthlyTokenLimit,
-    monthlyGenerationLimit: plan.monthlyGenerationLimit
-  };
+  return `${year}-${month}`;
 }

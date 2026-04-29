@@ -1,16 +1,143 @@
 "use server";
 
-import { createActionError, createActionSuccess } from "@/lib/actions";
-import { requireDatabaseUserId } from "@/lib/auth";
-import { generationService } from "@/services/generation.service";
+import { z } from "zod";
+
+import { createErrorResult, createSuccessResult } from "@/lib/actions";
+import { AuthError } from "@/lib/auth";
+import {
+  canUsePremiumTemplate,
+  generationService
+} from "@/services/generation.service";
+import { usageService } from "@/services/usage.service";
+import { userService } from "@/services/user.service";
+import type {
+  DeleteGenerationResult,
+  CreateGenerationInput,
+  CreateGenerationResult
+} from "@/types/generation";
+
+const createGenerationSchema = z.object({
+  input: z.string().trim().min(1).max(10_000),
+  templateId: z.string().trim().min(1).optional(),
+  type: z.string().trim().optional(),
+  tone: z.string().trim().optional(),
+  language: z.string().trim().optional(),
+  audience: z.string().trim().optional(),
+  requirements: z.string().trim().optional(),
+  model: z.string().trim().min(1).optional()
+});
+
+function buildGenerationInputSnapshot(input: z.infer<typeof createGenerationSchema>): string {
+  const optionalSections = [
+    input.type ? `写作类型：${input.type}` : null,
+    input.tone ? `语气：${input.tone}` : null,
+    input.language ? `输出语言：${input.language}` : null,
+    input.audience ? `目标读者：${input.audience}` : null,
+    input.requirements ? `额外要求：${input.requirements}` : null
+  ].filter(Boolean);
+
+  if (optionalSections.length === 0) {
+    return input.input;
+  }
+
+  return [`写作需求：${input.input}`, ...optionalSections].join("\n");
+}
+
+export async function createGenerationAction(
+  input: CreateGenerationInput
+) {
+  try {
+    const parsedInput = createGenerationSchema.parse(input);
+    const user = await userService.getCurrentUser();
+    const hasRemainingUsage = await usageService.checkUsageLimit(user.id);
+
+    if (!hasRemainingUsage) {
+      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
+    }
+
+    if (parsedInput.templateId) {
+      const template = await generationService.getTemplateAccessSnapshot(
+        parsedInput.templateId
+      );
+
+      if (!template || !template.isActive) {
+        return createErrorResult("Template not found.", "NOT_FOUND");
+      }
+
+      if (template.isPremium && !canUsePremiumTemplate(user.plan)) {
+        return createErrorResult(
+          "Premium template requires a paid plan.",
+          "PREMIUM_REQUIRED"
+        );
+      }
+    }
+
+    const generation = await generationService.createPendingGeneration({
+      userId: user.id,
+      templateId: parsedInput.templateId,
+      input: buildGenerationInputSnapshot(parsedInput),
+      model: parsedInput.model
+    });
+
+    return createSuccessResult<CreateGenerationResult>({
+      generationId: generation.id
+    });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return createErrorResult("Unauthorized.", "UNAUTHORIZED");
+    }
+
+    if (error instanceof z.ZodError) {
+      return createErrorResult("Invalid generation input.", "VALIDATION_ERROR");
+    }
+
+    throw error;
+  }
+}
 
 export async function getRecentGenerationsAction() {
   try {
-    const userId = await requireDatabaseUserId();
-    const generations = await generationService.listRecentByUser(userId);
+    const user = await userService.getCurrentUser();
+    const generations = await generationService.listRecentByUser(user.id);
 
-    return createActionSuccess(generations);
-  } catch {
-    return createActionError("FAILED_TO_LOAD_GENERATIONS");
+    return createSuccessResult(generations);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return createErrorResult("Unauthorized.", "UNAUTHORIZED");
+    }
+
+    return createErrorResult("Failed to load recent generations.");
+  }
+}
+
+export async function deleteGenerationAction(generationId: string) {
+  try {
+    const user = await userService.getCurrentUser();
+
+    if (!generationId) {
+      return createErrorResult("Generation not found.", "NOT_FOUND");
+    }
+
+    const generation = await generationService.getGenerationOwnerSnapshot(generationId);
+
+    if (!generation) {
+      return createErrorResult("Generation not found.", "NOT_FOUND");
+    }
+
+    if (generation.userId !== user.id) {
+      return createErrorResult("Forbidden.", "FORBIDDEN");
+    }
+
+    await generationService.deleteGeneration(generation.id);
+
+    return createSuccessResult<DeleteGenerationResult>({
+      deleted: true
+    });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return createErrorResult("Unauthorized.", "UNAUTHORIZED");
+    }
+
+    throw error;
   }
 }

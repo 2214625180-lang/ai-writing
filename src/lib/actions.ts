@@ -1,29 +1,19 @@
-export type ActionState<TData, TError extends string = string> =
-  | {
-      success: true;
-      data: TData;
-      error: null;
-    }
-  | {
-      success: false;
-      data: null;
-      error: TError;
-    };
+import type { ActionErrorCode, ActionResult } from "@/types/action";
 
-export function createActionSuccess<TData>(data: TData): ActionState<TData> {
+export function createSuccessResult<T>(data: T): ActionResult<T> {
   return {
     success: true,
-    data,
-    error: null
+    data
   };
 }
 
-export function createActionError<TError extends string>(
-  error: TError
-): ActionState<never, TError> {
+export function createErrorResult(
+  error: string,
+  code?: ActionErrorCode
+): ActionResult<never> {
   return {
     success: false,
-    data: null,
-    error
+    error,
+    code
   };
 }

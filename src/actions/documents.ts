@@ -1,16 +1,17 @@
 "use server";
 
-import { createActionError, createActionSuccess } from "@/lib/actions";
-import { requireDatabaseUserId } from "@/lib/auth";
+import { createErrorResult, createSuccessResult } from "@/lib/actions";
 import { documentService } from "@/services/document.service";
+import { userService } from "@/services/user.service";
 
 export async function getRecentDocumentsAction() {
   try {
-    const userId = await requireDatabaseUserId();
+    const user = await userService.getCurrentUser();
+    const userId = user.id;
     const documents = await documentService.listRecentByUser(userId);
 
-    return createActionSuccess(documents);
+    return createSuccessResult(documents);
   } catch {
-    return createActionError("FAILED_TO_LOAD_DOCUMENTS");
+    return createErrorResult("Failed to load recent documents.");
   }
 }

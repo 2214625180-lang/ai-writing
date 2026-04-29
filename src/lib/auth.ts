@@ -1,57 +1,63 @@
+import "server-only";
+
 import { auth, currentUser } from "@clerk/nextjs/server";
 
-import { prisma } from "@/lib/prisma";
+export class AuthError extends Error {
+  readonly code: "UNAUTHORIZED";
 
-export interface CurrentUserProfile {
-  clerkUserId: string;
-  email: string | null;
-  fullName: string;
-  avatarUrl: string | null;
+  constructor(message = "Authentication is required to access this resource.") {
+    super(message);
+    this.name = "AuthError";
+    this.code = "UNAUTHORIZED";
+  }
 }
 
-export async function requireAuth(): Promise<{ clerkUserId: string }> {
+export interface AuthContext {
+  clerkUserId: string;
+}
+
+export interface AuthenticatedClerkUserProfile {
+  clerkUserId: string;
+  email: string;
+  name: string | null;
+  imageUrl: string | null;
+}
+
+export async function requireAuth(): Promise<AuthContext> {
   const { userId } = await auth();
 
   if (!userId) {
-    throw new Error("Unauthorized request. Missing authenticated user.");
-  }
-
-  return { clerkUserId: userId };
-}
-
-export async function requireDatabaseUserId(): Promise<string> {
-  const { clerkUserId } = await requireAuth();
-
-  const databaseUser = await prisma.user.findUnique({
-    where: {
-      clerkUserId
-    },
-    select: {
-      id: true
-    }
-  });
-
-  if (!databaseUser) {
-    throw new Error("Authenticated user does not exist in the database.");
-  }
-
-  return databaseUser.id;
-}
-
-export async function getCurrentUserProfile(): Promise<CurrentUserProfile | null> {
-  const user = await currentUser();
-
-  if (!user) {
-    return null;
+    throw new AuthError();
   }
 
   return {
-    clerkUserId: user.id,
-    email: user.primaryEmailAddress?.emailAddress ?? null,
-    fullName:
-      [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
-      user.username ||
-      "Anonymous User",
-    avatarUrl: user.imageUrl
+    clerkUserId: userId
+  };
+}
+
+export async function getAuthenticatedClerkUserProfile(): Promise<AuthenticatedClerkUserProfile> {
+  const { clerkUserId } = await requireAuth();
+  const user = await currentUser();
+
+  if (!user) {
+    throw new AuthError("Authenticated Clerk user could not be loaded.");
+  }
+
+  const primaryEmailAddress = user.primaryEmailAddress?.emailAddress?.trim();
+
+  if (!primaryEmailAddress) {
+    throw new Error("Authenticated Clerk user is missing a primary email address.");
+  }
+
+  const normalizedName =
+    [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+    user.username ||
+    null;
+
+  return {
+    clerkUserId,
+    email: primaryEmailAddress,
+    name: normalizedName,
+    imageUrl: user.imageUrl ?? null
   };
 }

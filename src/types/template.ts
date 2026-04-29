@@ -1,11 +1,16 @@
-export interface TemplateRecord {
-  id: string;
-  name: string;
-  slug: string;
-  description: string;
-  promptTemplate: string;
-  isActive: boolean;
-  isSystem: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+export interface GetTemplatesParams {
+  category?: string;
+  isPremium?: boolean;
+  isActive?: boolean;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CreateGenerationFromTemplateInput {
+  templateId: string;
+  model: string;
+  fieldValues: Record<string, string | number | boolean | null>;
+  title?: string;
+  documentId?: string;
 }

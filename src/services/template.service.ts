@@ -6,14 +6,9 @@ export const templateService = {
       where: {
         isActive: true
       },
-      orderBy: [
-        {
-          isSystem: "desc"
-        },
-        {
-          createdAt: "desc"
-        }
-      ],
+      orderBy: {
+        createdAt: "desc"
+      },
       take: limit
     });
   }

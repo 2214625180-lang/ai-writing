@@ -3,7 +3,7 @@ import type { Plan } from "@prisma/client";
 
 import { CheckoutButton } from "@/components/billing/checkout-button";
 import type { CheckoutPlan } from "@/types/billing";
-
+export const dynamic = "force-dynamic";
 interface PricingPlan {
   code: Plan;
   name: string;

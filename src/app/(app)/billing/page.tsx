@@ -3,7 +3,7 @@ import { PricingCards } from "@/components/billing/pricing-cards";
 import { PLANS } from "@/lib/plans";
 import { billingService } from "@/services/billing.service";
 import { userService } from "@/services/user.service";
-
+export const dynamic = "force-dynamic";
 function formatSubscriptionStatus(status?: string): string {
   switch (status) {
     case "ACTIVE":

@@ -1,6 +1,6 @@
 # AI 写作助手 SaaS 初始化项目
 
-这是一个基于 `Next.js 14`、`App Router`、`TypeScript`、`Tailwind CSS`、`Prisma`、`PostgreSQL`、`Clerk`、`OpenAI` 和 `Stripe` 的 AI 写作助手 SaaS 工程骨架。
+这是一个基于 `Next.js 14`、`App Router`、`TypeScript`、`Tailwind CSS`、`Prisma`、`PostgreSQL`、`Clerk`、`OpenAI` 和 `Stripe` 的 AI 写作助手 SaaS 项目。
 
 ## 已完成
 

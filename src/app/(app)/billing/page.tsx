@@ -37,7 +37,7 @@ export default async function BillingPage() {
             订阅与账单
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
-            选择适合当前写作规模的套餐。支付和订阅管理由 Stripe Checkout 与 Customer Portal 处理。
+            选择适合当前写作规模的套餐。升级支付使用 Stripe Payment Element，订阅管理由 Customer Portal 处理。
           </p>
         </div>
 

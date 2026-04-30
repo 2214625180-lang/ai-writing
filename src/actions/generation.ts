@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { createErrorResult, createSuccessResult } from "@/lib/actions";
 import { AuthError } from "@/lib/auth";
+import { buildWritingPrompt } from "@/lib/prompts";
 import {
   canUsePremiumTemplate,
   GenerationForbiddenError,
@@ -11,7 +12,7 @@ import {
   GenerationPremiumRequiredError,
   generationService
 } from "@/services/generation.service";
-import { usageService } from "@/services/usage.service";
+import { UsageLimitExceededError } from "@/services/usage.service";
 import { userService } from "@/services/user.service";
 import type {
   DeleteGenerationResult,
@@ -55,11 +56,7 @@ export async function createGenerationAction(
   try {
     const parsedInput = createGenerationSchema.parse(input);
     const user = await userService.getCurrentUser();
-    const usageLimit = await usageService.checkUsageLimit(user.id);
-
-    if (!usageLimit.allowed) {
-      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
-    }
+    let inputSnapshot = buildGenerationInputSnapshot(parsedInput);
 
     if (parsedInput.templateId) {
       const template = await generationService.getTemplateAccessSnapshot(
@@ -76,12 +73,18 @@ export async function createGenerationAction(
           "PREMIUM_REQUIRED"
         );
       }
+
+      inputSnapshot = buildWritingPrompt({
+        input: inputSnapshot,
+        templatePrompt: template.prompt
+      });
     }
 
     const generation = await generationService.createPendingGeneration({
       userId: user.id,
+      plan: user.plan,
       templateId: parsedInput.templateId,
-      input: buildGenerationInputSnapshot(parsedInput),
+      input: inputSnapshot,
       model: parsedInput.model
     });
 
@@ -95,6 +98,10 @@ export async function createGenerationAction(
 
     if (error instanceof z.ZodError) {
       return createErrorResult("Invalid generation input.", "VALIDATION_ERROR");
+    }
+
+    if (error instanceof UsageLimitExceededError) {
+      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
     }
 
     throw error;
@@ -160,14 +167,10 @@ export async function rerunGenerationAction(generationId: string) {
       userId: user.id,
       userPlan: user.plan
     });
-    const usageLimit = await usageService.checkUsageLimit(user.id);
-
-    if (!usageLimit.allowed) {
-      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
-    }
 
     const generation = await generationService.createPendingGeneration({
       userId: user.id,
+      plan: user.plan,
       templateId: sourceGeneration.templateId ?? undefined,
       input: sourceGeneration.input,
       model: sourceGeneration.model
@@ -198,6 +201,10 @@ export async function rerunGenerationAction(generationId: string) {
         "Premium template requires a paid plan.",
         "PREMIUM_REQUIRED"
       );
+    }
+
+    if (error instanceof UsageLimitExceededError) {
+      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
     }
 
     throw error;

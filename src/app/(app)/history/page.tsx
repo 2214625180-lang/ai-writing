@@ -1,10 +1,23 @@
 import { GenerationHistoryList } from "@/components/history/generation-history-list";
+import { GenerationHistoryPagination } from "@/components/history/generation-history-pagination";
+import { normalizePaginationParams } from "@/lib/pagination";
 import { getGenerationHistory } from "@/services/generation.service";
 
-export default async function HistoryPage() {
+interface HistoryPageProps {
+  searchParams?: {
+    page?: string;
+    pageSize?: string;
+  };
+}
+
+export default async function HistoryPage({ searchParams }: HistoryPageProps) {
+  const { page, pageSize } = normalizePaginationParams({
+    page: searchParams?.page,
+    pageSize: searchParams?.pageSize
+  });
   const history = await getGenerationHistory({
-    page: 1,
-    pageSize: 20
+    page,
+    pageSize
   });
 
   return (
@@ -20,6 +33,11 @@ export default async function HistoryPage() {
       </section>
 
       <GenerationHistoryList history={history} />
+      <GenerationHistoryPagination
+        page={history.page}
+        pageSize={history.pageSize}
+        total={history.total}
+      />
     </div>
   );
 }

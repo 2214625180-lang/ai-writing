@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import Stripe from "stripe";
 
+import { logger } from "@/lib/logger";
 import { stripe } from "@/lib/stripe";
 import { billingService } from "@/services/billing.service";
 
@@ -39,6 +40,15 @@ function constructStripeEvent(params: {
 }
 
 async function handleStripeEvent(event: Stripe.Event) {
+  logger.info({
+    event: "stripe_webhook_received",
+    message: "Received Stripe webhook event.",
+    context: {
+      stripeEventId: event.id,
+      stripeEventType: event.type
+    }
+  });
+
   switch (event.type) {
     case "checkout.session.completed":
       await billingService.handleCheckoutSessionCompleted(
@@ -80,6 +90,11 @@ export async function POST(request: NextRequest) {
   const signature = request.headers.get("stripe-signature");
 
   if (!signature) {
+    logger.warn({
+      event: "stripe_webhook_signature_missing",
+      message: "Stripe webhook request is missing signature header."
+    });
+
     return createWebhookErrorResponse("Missing Stripe signature.");
   }
 
@@ -96,11 +111,26 @@ export async function POST(request: NextRequest) {
     const message =
       error instanceof Error ? error.message : "Invalid Stripe webhook signature.";
 
+    logger.error({
+      event: "stripe_webhook_signature_verification_failed",
+      message: "Failed to verify Stripe webhook signature.",
+      error
+    });
+
     return createWebhookErrorResponse(message);
   }
 
   try {
     await handleStripeEvent(event);
+
+    logger.info({
+      event: "stripe_webhook_processed",
+      message: "Processed Stripe webhook event.",
+      context: {
+        stripeEventId: event.id,
+        stripeEventType: event.type
+      }
+    });
 
     return NextResponse.json({
       received: true
@@ -108,6 +138,16 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to process Stripe webhook.";
+
+    logger.error({
+      event: "stripe_webhook_processing_failed",
+      message: "Failed to process Stripe webhook event.",
+      context: {
+        stripeEventId: event.id,
+        stripeEventType: event.type
+      },
+      error
+    });
 
     return createWebhookErrorResponse(message, 500);
   }

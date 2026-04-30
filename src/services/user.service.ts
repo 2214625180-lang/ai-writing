@@ -15,6 +15,13 @@ export interface CurrentUser {
   plan: Plan;
 }
 
+export class UserEmailConflictError extends Error {
+  constructor() {
+    super("A different Clerk user already owns this email address.");
+    this.name = "UserEmailConflictError";
+  }
+}
+
 async function findUserByClerkUserId(clerkUserId: string): Promise<User | null> {
   return prisma.user.findUnique({
     where: {
@@ -31,22 +38,10 @@ async function findUserByEmail(email: string): Promise<User | null> {
   });
 }
 
-async function findExistingUser(params: {
-  clerkUserId: string;
-  email: string;
-}): Promise<User | null> {
-  const userByClerkId = await findUserByClerkUserId(params.clerkUserId);
-
-  if (userByClerkId) {
-    return userByClerkId;
-  }
-
-  return findUserByEmail(params.email);
-}
-
 async function createUserFromClerkProfile(params: {
   clerkUserId: string;
   email: string;
+  emailVerified: boolean;
   name: string | null;
   imageUrl: string | null;
 }): Promise<User> {
@@ -66,9 +61,24 @@ async function updateUserFromClerkProfile(params: {
   id: string;
   clerkUserId: string;
   email: string;
+  emailVerified: boolean;
   name: string | null;
   imageUrl: string | null;
 }): Promise<User> {
+  const emailOwner = await findUserByEmail(params.email);
+
+  if (emailOwner && emailOwner.id !== params.id) {
+    console.warn("Blocked Clerk email sync because the email is already owned.", {
+      currentUserId: params.id,
+      currentClerkUserId: params.clerkUserId,
+      conflictingUserId: emailOwner.id,
+      email: params.email,
+      emailVerified: params.emailVerified
+    });
+
+    throw new UserEmailConflictError();
+  }
+
   // 先查出旧用户，以便比较 imageUrl
   const oldUser = await prisma.user.findUnique({ where: { id: params.id } });
   const imageVersion = (oldUser && oldUser.imageUrl !== params.imageUrl) 
@@ -91,13 +101,11 @@ async function updateUserFromClerkProfile(params: {
 async function createUserIfMissing(params: {
   clerkUserId: string;
   email: string;
+  emailVerified: boolean;
   name: string | null;
   imageUrl: string | null;
 }): Promise<User> {
-  const existingUser = await findExistingUser({
-    clerkUserId: params.clerkUserId,
-    email: params.email
-  });
+  const existingUser = await findUserByClerkUserId(params.clerkUserId);
 
   if (existingUser) {
     return existingUser;
@@ -108,13 +116,24 @@ async function createUserIfMissing(params: {
   } catch (error) {
     // Another request may have created the user between the lookup and create.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const concurrentUser = await findExistingUser({
-        clerkUserId: params.clerkUserId,
-        email: params.email
-      });
+      const concurrentUser = await findUserByClerkUserId(params.clerkUserId);
 
       if (concurrentUser) {
         return concurrentUser;
+      }
+
+      const emailOwner = await findUserByEmail(params.email);
+
+      if (emailOwner) {
+        console.warn("Blocked Clerk account creation because email is already owned.", {
+          attemptedClerkUserId: params.clerkUserId,
+          conflictingUserId: emailOwner.id,
+          conflictingClerkUserId: emailOwner.clerkUserId,
+          email: params.email,
+          emailVerified: params.emailVerified
+        });
+
+        throw new UserEmailConflictError();
       }
     }
 
@@ -140,10 +159,7 @@ function mapUserToCurrentUser(user: User): CurrentUser {
 export const userService = {
   async getCurrentUser(): Promise<CurrentUser> {
     const clerkProfile = await getAuthenticatedClerkUserProfile();
-    const existingUser = await findExistingUser({
-      clerkUserId: clerkProfile.clerkUserId,
-      email: clerkProfile.email
-    });
+    const existingUser = await findUserByClerkUserId(clerkProfile.clerkUserId);
 
     if (!existingUser) {
       const createdUser = await createUserIfMissing(clerkProfile);
@@ -165,6 +181,7 @@ export const userService = {
       id: existingUser.id,
       clerkUserId: clerkProfile.clerkUserId,
       email: clerkProfile.email,
+      emailVerified: clerkProfile.emailVerified,
       name: clerkProfile.name,
       imageUrl: clerkProfile.imageUrl
     });

@@ -11,9 +11,10 @@ import {
 import {
   buildPromptFromTemplateValues,
   templateService,
-  TemplateNotFoundError
+  TemplateNotFoundError,
+  TemplateValidationError
 } from "@/services/template.service";
-import { usageService } from "@/services/usage.service";
+import { UsageLimitExceededError } from "@/services/usage.service";
 import { userService } from "@/services/user.service";
 import type {
   CreateGenerationFromTemplateInput,
@@ -40,18 +41,14 @@ export async function createGenerationFromTemplateAction(
       );
     }
 
-    const usageLimit = await usageService.checkUsageLimit(user.id);
-
-    if (!usageLimit.allowed) {
-      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
-    }
-
     const inputSnapshot = buildPromptFromTemplateValues(
       template.prompt,
-      parsedInput.values
+      parsedInput.values,
+      template.fields
     );
     const generation = await generationService.createPendingTemplateGeneration({
       userId: user.id,
+      plan: user.plan,
       templateId: template.id,
       input: inputSnapshot
     });
@@ -70,6 +67,14 @@ export async function createGenerationFromTemplateAction(
 
     if (error instanceof TemplateNotFoundError) {
       return createErrorResult("Template not found.", "NOT_FOUND");
+    }
+
+    if (error instanceof TemplateValidationError) {
+      return createErrorResult(error.message, "VALIDATION_ERROR");
+    }
+
+    if (error instanceof UsageLimitExceededError) {
+      return createErrorResult("Usage limit exceeded.", "USAGE_LIMIT_EXCEEDED");
     }
 
     throw error;

@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import Stripe from "stripe";
 
 import { createErrorResult, createSuccessResult } from "@/lib/actions";
 import { AuthError } from "@/lib/auth";
@@ -15,6 +16,8 @@ import { userService } from "@/services/user.service";
 import type {
   CreateCheckoutSessionInput,
   CreateCheckoutSessionResult,
+  CreatePaymentElementSubscriptionInput,
+  CreatePaymentElementSubscriptionResult,
   CreateCustomerPortalResult
 } from "@/types/billing";
 
@@ -23,6 +26,14 @@ const createCheckoutSessionSchema = z.object({
 });
 
 function toStripeErrorMessage(error: unknown): string {
+  if (error instanceof Stripe.errors.StripeAuthenticationError) {
+    return "Stripe secret key is invalid. Please update STRIPE_SECRET_KEY in your environment variables.";
+  }
+
+  if (error instanceof Stripe.errors.StripeError) {
+    return error.message.replace(/sk_(test|live)_[A-Za-z0-9_*]+/g, "sk_$1_***");
+  }
+
   if (error instanceof Error) {
     return error.message;
   }
@@ -49,6 +60,44 @@ export async function createCheckoutSessionAction(
 
     if (error instanceof z.ZodError) {
       return createErrorResult("Invalid checkout session input.", "VALIDATION_ERROR");
+    }
+
+    if (error instanceof BillingUserNotFoundError) {
+      return createErrorResult("User not found.", "NOT_FOUND");
+    }
+
+    if (
+      error instanceof StripeConfigurationError ||
+      error instanceof StripeSessionError
+    ) {
+      return createErrorResult(error.message, "STRIPE_ERROR");
+    }
+
+    return createErrorResult(toStripeErrorMessage(error), "STRIPE_ERROR");
+  }
+}
+
+export async function createPaymentElementSubscriptionAction(
+  input: CreatePaymentElementSubscriptionInput
+) {
+  try {
+    const parsedInput = createCheckoutSessionSchema.parse(input);
+    const user = await userService.getCurrentUser();
+    const subscription = await billingService.createPaymentElementSubscription({
+      userId: user.id,
+      plan: parsedInput.plan
+    });
+
+    return createSuccessResult<CreatePaymentElementSubscriptionResult>(
+      subscription
+    );
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return createErrorResult("Unauthorized.", "UNAUTHORIZED");
+    }
+
+    if (error instanceof z.ZodError) {
+      return createErrorResult("Invalid subscription input.", "VALIDATION_ERROR");
     }
 
     if (error instanceof BillingUserNotFoundError) {

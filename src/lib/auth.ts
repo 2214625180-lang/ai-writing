@@ -19,6 +19,7 @@ export interface AuthContext {
 export interface AuthenticatedClerkUserProfile {
   clerkUserId: string;
   email: string;
+  emailVerified: boolean;
   name: string | null;
   imageUrl: string | null;
 }
@@ -57,6 +58,8 @@ export async function getAuthenticatedClerkUserProfile(): Promise<AuthenticatedC
   return {
     clerkUserId,
     email: primaryEmailAddress,
+    emailVerified:
+      user.primaryEmailAddress?.verification?.status === "verified",
     name: normalizedName,
     imageUrl: user.imageUrl ?? null
   };

@@ -2,6 +2,7 @@ import { CreateDocumentForm } from "@/components/documents/create-document-form"
 import { DocumentFilters } from "@/components/documents/document-filters";
 import { DocumentList } from "@/components/documents/document-list";
 import { DocumentPagination } from "@/components/documents/document-pagination";
+import { normalizePaginationParams } from "@/lib/pagination";
 import { getDocuments } from "@/services/document.service";
 
 interface DocumentsPageProps {
@@ -13,16 +14,6 @@ interface DocumentsPageProps {
   };
 }
 
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-  const parsedValue = Number(value);
-
-  if (!Number.isFinite(parsedValue)) {
-    return fallback;
-  }
-
-  return Math.max(1, Math.floor(parsedValue));
-}
-
 function parseFavoriteOnly(value: string | undefined): boolean {
   return value === "true";
 }
@@ -30,8 +21,10 @@ function parseFavoriteOnly(value: string | undefined): boolean {
 export default async function DocumentsPage({ searchParams }: DocumentsPageProps) {
   const keyword = searchParams?.keyword?.trim() || undefined;
   const favoriteOnly = parseFavoriteOnly(searchParams?.favoriteOnly);
-  const page = parsePositiveInteger(searchParams?.page, 1);
-  const pageSize = Math.min(parsePositiveInteger(searchParams?.pageSize, 20), 100);
+  const { page, pageSize } = normalizePaginationParams({
+    page: searchParams?.page,
+    pageSize: searchParams?.pageSize
+  });
   const documents = await getDocuments({
     keyword,
     favoriteOnly,

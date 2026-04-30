@@ -3,6 +3,10 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import {
+  buildPromptFromTemplateValues,
+  TemplateFieldValidationError
+} from "@/lib/template-fields";
 import type {
   GetTemplatesParams,
   TemplateDetail,
@@ -15,6 +19,11 @@ export class TemplateNotFoundError extends Error {
     this.name = "TemplateNotFoundError";
   }
 }
+
+export {
+  buildPromptFromTemplateValues,
+  TemplateFieldValidationError as TemplateValidationError
+};
 
 function normalizeText(value?: string): string | undefined {
   const normalizedValue = value?.trim();
@@ -93,50 +102,6 @@ function toTemplateDetail(template: {
     createdAt: template.createdAt,
     updatedAt: template.updatedAt
   };
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function applyPromptValue(prompt: string, key: string, value: string): string {
-  const escapedKey = escapeRegExp(key);
-  const patterns = [
-    new RegExp(`{{\\s*${escapedKey}\\s*}}`, "g"),
-    new RegExp(`{\\s*${escapedKey}\\s*}`, "g")
-  ];
-
-  return patterns.reduce(
-    (currentPrompt, pattern) => currentPrompt.replace(pattern, value),
-    prompt
-  );
-}
-
-export function buildPromptFromTemplateValues(
-  templatePrompt: string,
-  values: Record<string, string>
-): string {
-  const normalizedValues = Object.entries(values).map(([key, value]) => [
-    key.trim(),
-    value.trim()
-  ]);
-
-  const promptWithValues = normalizedValues.reduce(
-    (currentPrompt, [key, value]) =>
-      key ? applyPromptValue(currentPrompt, key, value) : currentPrompt,
-    templatePrompt
-  );
-
-  const valueSummary = normalizedValues
-    .filter(([key, value]) => key && value)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join("\n");
-
-  if (!valueSummary) {
-    return promptWithValues;
-  }
-
-  return `${promptWithValues}\n\nUser provided values:\n${valueSummary}`;
 }
 
 export const templateService = {

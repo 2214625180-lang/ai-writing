@@ -6,7 +6,7 @@ import "@/app/globals.css";
 
 export const metadata: Metadata = {
   title: "AI 写作助手",
-  description: "基于 Next.js、Clerk、Prisma 和 OpenAI 的 AI 写作 SaaS 初始化项目。"
+  description: "基于 Next.js、Clerk、Prisma 和 OpenAI 的 AI 写作 SaaS 项目。"
 };
 
 export default function RootLayout({

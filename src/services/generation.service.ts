@@ -3,6 +3,7 @@ import "server-only";
 import { GenerationStatus, type Plan, type Template } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { usageService } from "@/services/usage.service";
 import { userService } from "@/services/user.service";
 import type {
   GenerationHistoryResult,
@@ -13,6 +14,7 @@ const DEFAULT_GENERATION_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mi
 
 export interface CreatePendingGenerationParams {
   userId: string;
+  plan: Plan;
   input: string;
   templateId?: string;
   model?: string;
@@ -20,13 +22,14 @@ export interface CreatePendingGenerationParams {
 
 export interface CreatePendingTemplateGenerationParams {
   userId: string;
+  plan: Plan;
   templateId: string;
   input: string;
 }
 
 export type GenerationTemplateAccessSnapshot = Pick<
   Template,
-  "id" | "isActive" | "isPremium"
+  "id" | "isActive" | "isPremium" | "prompt"
 >;
 
 export class GenerationNotFoundError extends Error {
@@ -73,18 +76,31 @@ function normalizePagination(params: GetGenerationHistoryParams) {
   };
 }
 
-function createPendingGenerationRecord(params: CreatePendingGenerationParams) {
-  return prisma.generation.create({
-    data: {
+function createPendingGenerationWithUsageReservation(
+  params: CreatePendingGenerationParams
+) {
+  return prisma.$transaction(async (tx) => {
+    const generation = await tx.generation.create({
+      data: {
+        userId: params.userId,
+        templateId: params.templateId,
+        input: params.input,
+        model: params.model ?? DEFAULT_GENERATION_MODEL,
+        status: GenerationStatus.PENDING
+      },
+      select: {
+        id: true
+      }
+    });
+
+    await usageService.reserveGenerationUsage({
+      tx,
       userId: params.userId,
-      templateId: params.templateId,
-      input: params.input,
-      model: params.model ?? DEFAULT_GENERATION_MODEL,
-      status: GenerationStatus.PENDING
-    },
-    select: {
-      id: true
-    }
+      generationId: generation.id,
+      plan: params.plan
+    });
+
+    return generation;
   });
 }
 
@@ -217,7 +233,8 @@ export const generationService = {
       select: {
         id: true,
         isActive: true,
-        isPremium: true
+        isPremium: true,
+        prompt: true
       }
     });
   },
@@ -240,14 +257,15 @@ export const generationService = {
   },
 
   async createPendingGeneration(params: CreatePendingGenerationParams) {
-    return createPendingGenerationRecord(params);
+    return createPendingGenerationWithUsageReservation(params);
   },
 
   async createPendingTemplateGeneration(
     params: CreatePendingTemplateGenerationParams
   ) {
-    return createPendingGenerationRecord({
+    return createPendingGenerationWithUsageReservation({
       userId: params.userId,
+      plan: params.plan,
       templateId: params.templateId,
       input: params.input
     });

@@ -5,111 +5,29 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, Loader2, Wand2 } from "lucide-react";
 
 import { createGenerationFromTemplateAction } from "@/actions/templates";
+import {
+  parseTemplateFields,
+  type TemplateFieldDefinition
+} from "@/lib/template-fields";
 
 interface TemplateUseFormProps {
   templateId: string;
   fields: unknown;
 }
 
-interface TemplateField {
-  name: string;
-  label: string;
-  type: "text" | "textarea";
-  placeholder?: string;
-  required: boolean;
-  description?: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeFieldFromRecord(
-  field: Record<string, unknown>,
-  fallbackName: string
-): TemplateField {
-  const name =
-    typeof field.name === "string"
-      ? field.name
-      : typeof field.key === "string"
-        ? field.key
-        : typeof field.id === "string"
-          ? field.id
-          : fallbackName;
-  const label = typeof field.label === "string" ? field.label : name;
-  const type = field.type === "textarea" || field.multiline === true ? "textarea" : "text";
-
-  return {
-    name,
-    label,
-    type,
-    placeholder:
-      typeof field.placeholder === "string" ? field.placeholder : undefined,
-    required: field.required !== false,
-    description:
-      typeof field.description === "string" ? field.description : undefined
-  };
-}
-
-function parseTemplateFields(fields: unknown): TemplateField[] {
-  if (Array.isArray(fields)) {
-    const parsedFields = fields
-      .map((field, index): TemplateField | null => {
-        if (typeof field === "string") {
-          return {
-            name: field,
-            label: field,
-            type: "text",
-            required: true
-          };
-        }
-
-        if (isRecord(field)) {
-          return normalizeFieldFromRecord(field, `field_${index + 1}`);
-        }
-
-        return null;
-      })
-      .filter((field): field is TemplateField => Boolean(field));
-
-    if (parsedFields.length > 0) {
-      return parsedFields;
-    }
+const fallbackFields: TemplateFieldDefinition[] = [
+  {
+    name: "topic",
+    label: "写作主题",
+    type: "textarea",
+    placeholder: "输入你希望模板围绕的主题、背景或核心要求。",
+    required: true
   }
+];
 
-  if (isRecord(fields)) {
-    return Object.entries(fields).map(([key, value]) => {
-      if (isRecord(value)) {
-        return normalizeFieldFromRecord(
-          {
-            name: key,
-            ...value
-          },
-          key
-        );
-      }
-
-      return {
-        name: key,
-        label: key,
-        type: "text",
-        required: true
-      };
-    });
-  }
-
-  return [
-    {
-      name: "topic",
-      label: "写作主题",
-      type: "textarea",
-      placeholder: "输入你希望模板围绕的主题、背景或核心要求。",
-      required: true
-    }
-  ];
-}
-
-function buildInitialValues(fields: TemplateField[]): Record<string, string> {
+function buildInitialValues(
+  fields: TemplateFieldDefinition[]
+): Record<string, string> {
   return fields.reduce<Record<string, string>>((values, field) => {
     values[field.name] = "";
 
@@ -120,7 +38,11 @@ function buildInitialValues(fields: TemplateField[]): Record<string, string> {
 export function TemplateUseForm({ templateId, fields }: TemplateUseFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const normalizedFields = useMemo(() => parseTemplateFields(fields), [fields]);
+  const normalizedFields = useMemo(() => {
+    const parsedFields = parseTemplateFields(fields);
+
+    return parsedFields.length > 0 ? parsedFields : fallbackFields;
+  }, [fields]);
   const [values, setValues] = useState<Record<string, string>>(() =>
     buildInitialValues(normalizedFields)
   );
@@ -182,6 +104,21 @@ export function TemplateUseForm({ templateId, fields }: TemplateUseFormProps) {
                 placeholder={field.placeholder}
                 className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400"
               />
+            ) : field.type === "select" && field.options?.length ? (
+              <select
+                id={`${templateId}-${field.name}`}
+                value={values[field.name] ?? ""}
+                onChange={(event) => updateValue(field.name, event.target.value)}
+                required={field.required}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+              >
+                <option value="">请选择</option>
+                {field.options.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             ) : (
               <input
                 id={`${templateId}-${field.name}`}

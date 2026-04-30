@@ -1,6 +1,6 @@
 import "server-only";
 
-import { UsageType, type Plan } from "@prisma/client";
+import { Prisma, UsageType, type Plan } from "@prisma/client";
 
 import { getPlanGenerationLimit } from "@/lib/plans";
 import { prisma } from "@/lib/prisma";
@@ -21,6 +21,16 @@ export interface UsageLimitResult {
   limit: number;
   remaining: number;
   reason?: "USAGE_LIMIT_EXCEEDED";
+}
+
+export class UsageLimitExceededError extends Error {
+  readonly usage: UsageLimitResult;
+
+  constructor(usage: UsageLimitResult) {
+    super("Usage limit exceeded.");
+    this.name = "UsageLimitExceededError";
+    this.usage = usage;
+  }
 }
 
 export interface RecordUsageInput {
@@ -59,6 +69,53 @@ async function getUsageSummaryForUser(params: {
   };
 }
 
+function getUsageLockKey(userId: string, period: string): string {
+  return `usage:${userId}:${period}:generation`;
+}
+
+async function lockUserGenerationUsage(params: {
+  tx: Prisma.TransactionClient;
+  userId: string;
+  period: string;
+}) {
+  await params.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext(${getUsageLockKey(
+      params.userId,
+      params.period
+    )}))
+  `;
+}
+
+async function getGenerationUsageSummaryInTransaction(params: {
+  tx: Prisma.TransactionClient;
+  userId: string;
+  plan: Plan;
+  period: string;
+}): Promise<UsageLimitResult> {
+  const usageAggregate = await params.tx.usageRecord.aggregate({
+    where: {
+      userId: params.userId,
+      period: params.period,
+      type: UsageType.GENERATION
+    },
+    _sum: {
+      count: true
+    }
+  });
+  const used = usageAggregate._sum.count ?? 0;
+  const limit = getPlanGenerationLimit(params.plan);
+  const remaining = Math.max(limit - used, 0);
+  const allowed = used < limit;
+
+  return {
+    allowed,
+    used,
+    limit,
+    remaining,
+    reason: allowed ? undefined : "USAGE_LIMIT_EXCEEDED"
+  };
+}
+
 export const usageService = {
   async recordUsage(params: RecordUsageInput) {
     return prisma.usageRecord.create({
@@ -78,12 +135,81 @@ export const usageService = {
     generationId: string;
     tokens?: number;
   }) {
-    return this.recordUsage({
+    return prisma.usageRecord.updateMany({
+      where: {
+        userId: params.userId,
+        generationId: params.generationId,
+        type: UsageType.GENERATION
+      },
+      data: {
+        tokens: params.tokens ?? null
+      }
+    });
+  },
+
+  async reserveGenerationUsage(params: {
+    tx: Prisma.TransactionClient;
+    userId: string;
+    generationId: string;
+    plan: Plan;
+  }) {
+    const period = getCurrentPeriod();
+
+    await lockUserGenerationUsage({
+      tx: params.tx,
       userId: params.userId,
-      generationId: params.generationId,
-      type: UsageType.GENERATION,
-      count: 1,
-      tokens: params.tokens
+      period
+    });
+
+    const usageLimit = await getGenerationUsageSummaryInTransaction({
+      tx: params.tx,
+      userId: params.userId,
+      plan: params.plan,
+      period
+    });
+
+    if (!usageLimit.allowed) {
+      throw new UsageLimitExceededError(usageLimit);
+    }
+
+    return params.tx.usageRecord.create({
+      data: {
+        userId: params.userId,
+        generationId: params.generationId,
+        type: UsageType.GENERATION,
+        count: 1,
+        period
+      }
+    });
+  },
+
+  async attachGenerationUsageTokens(params: {
+    userId: string;
+    generationId: string;
+    tokens: number;
+  }) {
+    return prisma.usageRecord.updateMany({
+      where: {
+        userId: params.userId,
+        generationId: params.generationId,
+        type: UsageType.GENERATION
+      },
+      data: {
+        tokens: params.tokens
+      }
+    });
+  },
+
+  async releaseGenerationUsageReservation(params: {
+    userId: string;
+    generationId: string;
+  }) {
+    return prisma.usageRecord.deleteMany({
+      where: {
+        userId: params.userId,
+        generationId: params.generationId,
+        type: UsageType.GENERATION
+      }
     });
   },
 

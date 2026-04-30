@@ -7,15 +7,18 @@ const isProtectedRoute = createRouteMatcher([
   "/templates(.*)",
   "/billing(.*)",
   "/settings(.*)",
-  "/api/generate(.*)"
+  "/api/generate(.*)",
 ]);
 
-export default clerkMiddleware(async (auth, request) => {
+export default clerkMiddleware((auth, request) => {
   if (isProtectedRoute(request)) {
-    await auth().protect();
+    auth().protect(); // 👈 去掉 async + await
   }
 });
 
 export const config = {
-  matcher: ["/((?!.+\\.[\\w]+$|_next).*)", "/", "/(api|trpc)(.*)"]
+  matcher: [
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico)).*)",
+    "/(api|trpc)(.*)",
+  ],
 };

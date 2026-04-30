@@ -11,7 +11,8 @@
     "prisma:migrate": "prisma migrate dev --schema src/prisma/schema.prisma",
     "prisma:seed": "prisma db seed --schema src/prisma/schema.prisma",
     "prisma:studio": "prisma studio --schema src/prisma/schema.prisma",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "vercel-build": "prisma generate --schema src/prisma/schema.prisma && next build"
   },
   "prisma": {
     "seed": "node src/prisma/seed.js",
@@ -30,7 +31,8 @@
     "react-dom": "^18.3.1",
     "stripe": "^15.12.0",
     "tailwind-merge": "^2.6.1",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "prisma": "^5.14.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.2",

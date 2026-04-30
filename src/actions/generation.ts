@@ -1,7 +1,5 @@
 "use server";
-
 import { z } from "zod";
-
 import { createErrorResult, createSuccessResult } from "@/lib/actions";
 import { AuthError } from "@/lib/auth";
 import { buildWritingPrompt } from "@/lib/prompts";

@@ -14,7 +14,8 @@
     "test:unit": "vitest run"
   },
   "prisma": {
-    "seed": "node src/prisma/seed.js"
+    "seed": "node src/prisma/seed.js",
+    "schema": "src/prisma/schema.prisma"
   },
   "dependencies": {
     "@clerk/nextjs": "^5.7.6",
